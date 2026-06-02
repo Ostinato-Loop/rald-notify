@@ -1,0 +1,42 @@
+name = "rald-notify"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = []
+
+[vars]
+ENVIRONMENT = "production"
+SERVICE_NAME = "rald-notify"
+SERVICE_VERSION = "1.0.0"
+
+# Secrets — set via: wrangler secret put <NAME>
+# Required:
+#   SUPABASE_URL                — Supabase project URL
+#   SUPABASE_SERVICE_ROLE_KEY   — Supabase service role key
+#   RALD_JWT_SECRET             — JWT signing secret (min 32 chars)
+#   RESEND_API_KEY              — Email delivery (https://resend.com)
+#   TERMII_API_KEY              — SMS delivery primary (https://termii.com)
+#   VAPID_PUBLIC_KEY            — Web Push VAPID public key
+#   VAPID_PRIVATE_KEY           — Web Push VAPID private key
+#   VAPID_SUBJECT               — Web Push VAPID subject (mailto:...)
+# Optional:
+#   TWILIO_ACCOUNT_SID          — SMS fallback
+#   TWILIO_AUTH_TOKEN           — SMS fallback
+#   TWILIO_FROM_NUMBER          — SMS fallback sender
+
+[[routes]]
+pattern = "notification.rald.cloud/*"
+zone_name = "rald.cloud"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "placeholder-replace-with-actual-kv-id"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[build]
+command = ""
+
+[observability]
+enabled = true
+head_sampling_rate = 1
