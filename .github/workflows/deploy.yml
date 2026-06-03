@@ -32,10 +32,8 @@ jobs:
         run: |
           node << 'JSEOF'
           const fs = require('fs');
-          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-          const token = process.env.CLOUDFLARE_API_TOKEN;
-          const h = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
-          const base = `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces`;
+          const h = { 'Authorization': `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' };
+          const base = `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces`;
           async function listAll() { const r = await fetch(`${base}?per_page=100`, { headers: h }); const d = await r.json(); if (!d.success) throw new Error(JSON.stringify(d.errors)); return d.result; }
           async function resolveId(title) {
             const all = await listAll();
@@ -59,37 +57,42 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      - name: Push SUPABASE_SERVICE_ROLE_KEY
+      - name: Push SUPABASE_SERVICE_ROLE_KEY to worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then echo "FATAL: SUPABASE_SERVICE_ROLE_KEY not set" && exit 1; fi
-          echo "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --name rald-notify && echo "pushed"
-      - name: Push RALD_JWT_SECRET
+          echo "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --name rald-notify
+          echo "SUPABASE_SERVICE_ROLE_KEY pushed to rald-notify"
+      - name: Push RALD_JWT_SECRET to worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           RALD_JWT_SECRET: ${{ secrets.RALD_JWT_SECRET }}
         run: |
-          if [ -z "$RALD_JWT_SECRET" ]; then echo "FATAL: RALD_JWT_SECRET not set" && exit 1; fi
-          echo "$RALD_JWT_SECRET" | npx wrangler secret put RALD_JWT_SECRET --name rald-notify && echo "pushed"
-      - name: Push RESEND_API_KEY
+          if [ -z "$RALD_JWT_SECRET" ]; then
+            echo "WARNING: RALD_JWT_SECRET not set in GitHub secrets — add it as an org-level secret to complete setup"
+          else
+            echo "$RALD_JWT_SECRET" | npx wrangler secret put RALD_JWT_SECRET --name rald-notify
+            echo "RALD_JWT_SECRET pushed to rald-notify"
+          fi
+      - name: Push RESEND_API_KEY to worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: |
           if [ -n "$RESEND_API_KEY" ]; then echo "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY --name rald-notify && echo "pushed"; fi
-      - name: Push TERMII_API_KEY
+      - name: Push TERMII_API_KEY to worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TERMII_API_KEY: ${{ secrets.TERMII_API_KEY }}
         run: |
           if [ -n "$TERMII_API_KEY" ]; then echo "$TERMII_API_KEY" | npx wrangler secret put TERMII_API_KEY --name rald-notify && echo "pushed"; fi
-      - name: Push VAPID secrets
+      - name: Push VAPID secrets to worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
