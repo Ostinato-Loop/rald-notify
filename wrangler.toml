@@ -20,22 +20,20 @@ head_sampling_rate = 1
 
 # Secrets — set via: wrangler secret put <NAME>
 # Required:
-#   SUPABASE_URL
-#   SUPABASE_SERVICE_ROLE_KEY
+#   SUPABASE_URL (org secret)
+#   SUPABASE_SERVICE_ROLE_KEY (org secret)
 #   RALD_JWT_SECRET
 #   RESEND_API_KEY
 #   TERMII_API_KEY
 #   VAPID_PUBLIC_KEY
 #   VAPID_PRIVATE_KEY
 #   VAPID_SUBJECT
-# Optional:
-#   TWILIO_ACCOUNT_SID
-#   TWILIO_AUTH_TOKEN
-#   TWILIO_FROM_NUMBER
 
 [env.production]
 name = "rald-notify"
-vars = { ENVIRONMENT = "production" }
+
+[env.production.vars]
+ENVIRONMENT = "production"
 
 [[env.production.routes]]
 pattern = "notification.rald.cloud/*"
@@ -43,4 +41,4 @@ zone_name = "rald.cloud"
 
 [[env.production.kv_namespaces]]
 binding = "RATE_LIMIT_KV"
-id = "REPLACE_WITH_PRODUCTION_KV_ID"
+id = "REPLACE_WITH_RATE_LIMIT_KV_ID"
