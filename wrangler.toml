@@ -15,19 +15,13 @@ zone_name = "rald.cloud"
 binding = "RATE_LIMIT_KV"
 id = "REPLACE_WITH_RATE_LIMIT_KV_ID"
 
-[triggers]
-crons = ["*/5 * * * *"]
-
 [observability]
 enabled = true
 head_sampling_rate = 1
 
-# Secrets — pushed via deploy.yml using: wrangler secret put <NAME>
-# Required:
-#   SUPABASE_URL (org secret)
-#   SUPABASE_SERVICE_ROLE_KEY (org secret)
-#   RALD_JWT_SECRET
-#   RESEND_API_KEY
-# Optional:
-#   TERMII_API_KEY
-#   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT
+# Cron trigger disabled — register manually via Cloudflare dashboard if needed:
+# Scheduled Functions > notification.rald.cloud > Add Cron Trigger > */5 * * * *
+
+# Secrets pushed by deploy.yml via wrangler secret put:
+#   SUPABASE_URL (org), SUPABASE_SERVICE_ROLE_KEY (org)
+#   RALD_JWT_SECRET, RESEND_API_KEY (optional: TERMII_API_KEY, VAPID_*)
