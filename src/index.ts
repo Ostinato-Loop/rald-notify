@@ -13,10 +13,7 @@ import deliveriesRoutes from "./routes/deliveries";
 import eventsRoutes from "./routes/events";
 import auditRoutes from "./routes/audit";
 
-export interface KVNamespace {
-  get(key: string): Promise<string | null>;
-  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
-}
+// KVNamespace is provided globally by @cloudflare/workers-types
 
 export type Bindings = {
   SUPABASE_URL: string;
@@ -36,8 +33,8 @@ export type Bindings = {
 
 export type Variables = {
   db: SupabaseClient;
-  user?: JwtPayload;
-  workspaceId?: string;
+  user: JwtPayload;
+  workspaceId: string;
 };
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
