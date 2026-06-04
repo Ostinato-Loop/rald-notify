@@ -75,7 +75,19 @@ app.route("/api/audit",         auditRoutes);
 
 // Scheduled trigger — process queued retries
 export default {
-  async fetch(req: Request, env: Bindings, ctx: ExecutionContext) {
+  async fetch(req: Request, env: Bindings, ctx: ExecutionContext): Promise<Response> {
+    // ── FAIL FAST — service must not start with missing secrets ──────────
+    const missing: string[] = [];
+    if (!env.RALD_JWT_SECRET)           missing.push('RALD_JWT_SECRET');
+    if (!env.SUPABASE_URL)              missing.push('SUPABASE_URL');
+    if (!env.SUPABASE_SERVICE_ROLE_KEY) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+    if (!env.RESEND_API_KEY)            missing.push('RESEND_API_KEY');
+    if (missing.length) {
+      console.error(`[FATAL] rald-notify: missing required secrets: ${missing.join(', ')}`);
+      return new Response(JSON.stringify({ error: 'Service misconfigured', missing, service: 'rald-notify' }), {
+        status: 503, headers: { 'Content-Type': 'application/json' },
+      });
+    }
     return app.fetch(req, env, ctx);
   },
   async scheduled(_event: ScheduledEvent, env: Bindings, _ctx: ExecutionContext) {
