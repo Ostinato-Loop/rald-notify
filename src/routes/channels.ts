@@ -24,7 +24,7 @@ router.get("/", async (c) => {
 // PUT /api/channels/:type — configure a channel
 router.put("/:type", adminMiddleware, async (c) => {
   const db = c.get("db"); const user = c.get("user")!; const workspaceId = c.get("workspaceId") as string;
-  const type = c.req.param("type");
+  const type = c.req.param("type") as string;
   if (!SUPPORTED_CHANNELS.includes(type)) return c.json({ error: `Channel '${type}' not supported. Supported: ${SUPPORTED_CHANNELS.join(", ")}` }, 400);
   const body = await c.req.json() as { enabled?: boolean; config?: Record<string, unknown> };
   const { data, error } = await db.from("notification_channels").upsert({
