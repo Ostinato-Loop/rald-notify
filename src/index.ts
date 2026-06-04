@@ -13,7 +13,11 @@ import deliveriesRoutes from "./routes/deliveries";
 import eventsRoutes from "./routes/events";
 import auditRoutes from "./routes/audit";
 
-// KVNamespace is provided globally by @cloudflare/workers-types
+export interface KVNamespace {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+  delete(key: string): Promise<void>;
+}
 
 export type Bindings = {
   SUPABASE_URL: string;
