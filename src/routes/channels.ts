@@ -12,7 +12,7 @@ const FUTURE_CHANNELS = ["messenger", "whatsapp", "instagram", "facebook"];
 
 // GET /api/channels — list channel configs for workspace
 router.get("/", async (c) => {
-  const db = c.get("db"); const workspaceId = c.get("workspaceId");
+  const db = c.get("db"); const workspaceId = c.get("workspaceId") as string;
   const { data } = await db.from("notification_channels").select("id,workspace_id,channel_type,enabled,created_at,updated_at").eq("workspace_id", workspaceId);
   const channels = SUPPORTED_CHANNELS.map(type => {
     const cfg = data?.find((d: any) => d.channel_type === type);
@@ -23,7 +23,7 @@ router.get("/", async (c) => {
 
 // PUT /api/channels/:type — configure a channel
 router.put("/:type", adminMiddleware, async (c) => {
-  const db = c.get("db"); const user = c.get("user"); const workspaceId = c.get("workspaceId");
+  const db = c.get("db"); const user = c.get("user")!; const workspaceId = c.get("workspaceId") as string;
   const type = c.req.param("type");
   if (!SUPPORTED_CHANNELS.includes(type)) return c.json({ error: `Channel '${type}' not supported. Supported: ${SUPPORTED_CHANNELS.join(", ")}` }, 400);
   const body = await c.req.json() as { enabled?: boolean; config?: Record<string, unknown> };
