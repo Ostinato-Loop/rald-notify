@@ -77,11 +77,12 @@ app.route("/api/audit",         auditRoutes);
 export default {
   async fetch(req: Request, env: Bindings, ctx: ExecutionContext): Promise<Response> {
     // ── FAIL FAST — service must not start with missing secrets ──────────
+    // FIX-003 (2026-06-10): RESEND_API_KEY demoted to warning — service runs degraded without it.
     const missing: string[] = [];
     if (!env.RALD_JWT_SECRET)           missing.push('RALD_JWT_SECRET');
     if (!env.SUPABASE_URL)              missing.push('SUPABASE_URL');
     if (!env.SUPABASE_SERVICE_ROLE_KEY) missing.push('SUPABASE_SERVICE_ROLE_KEY');
-    if (!env.RESEND_API_KEY)            missing.push('RESEND_API_KEY');
+    if (!env.RESEND_API_KEY)            console.warn('[rald-notify] RESEND_API_KEY not set — email delivery unavailable');
     if (missing.length) {
       console.error(`[FATAL] rald-notify: missing required secrets: ${missing.join(', ')}`);
       return new Response(JSON.stringify({ error: 'Service misconfigured', missing, service: 'rald-notify' }), {
