@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy to Cloudflare Workers (notification.rald.cloud)
+    name: Deploy to Cloudflare Workers (notification.rald.cloud + notify.rald.cloud)
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -54,7 +54,7 @@ jobs:
           })().catch(e => { console.error(e); process.exit(1); });
           JSEOF
 
-      - name: Ensure notification.rald.cloud DNS record exists
+      - name: Ensure DNS records for notification.rald.cloud and notify.rald.cloud
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -68,26 +68,26 @@ jobs:
             });
             return r.json();
           }
+          async function ensureAAAA(zoneId, name, label) {
+            const existing = await api('GET', `/zones/${zoneId}/dns_records?name=${name}`);
+            if (existing.result?.length > 0) {
+              console.log(`✓ ${name} DNS already exists: ${existing.result.map(r => r.type + ' ' + r.content + ' proxied=' + r.proxied).join(', ')}`);
+              return;
+            }
+            const r = await api('POST', `/zones/${zoneId}/dns_records`, {
+              type: 'AAAA', name: label, content: '100::', proxied: true,
+              comment: `Cloudflare Worker route — rald-notify (${name})`
+            });
+            if (r.success) console.log(`✓ Created ${name} AAAA 100:: (proxied)`);
+            else console.error(`DNS ${name} failed:`, JSON.stringify(r.errors));
+          }
           (async () => {
             const zones = await api('GET', '/zones?name=rald.cloud&per_page=5');
             const zone = zones.result?.[0];
             if (!zone) { console.log('WARN: rald.cloud zone not found — skipping DNS step'); return; }
             console.log(`Zone: ${zone.id} (${zone.name})`);
-            const existing = await api('GET', `/zones/${zone.id}/dns_records?name=notification.rald.cloud`);
-            if (existing.result?.length > 0) {
-              console.log('notification.rald.cloud DNS already exists:', existing.result.map(r => `${r.type} ${r.content} proxied=${r.proxied}`).join(', '));
-              return;
-            }
-            // Create proxied AAAA 100:: — Cloudflare Workers route dummy record
-            const r = await api('POST', `/zones/${zone.id}/dns_records`, {
-              type: 'AAAA', name: 'notification', content: '100::', proxied: true,
-              comment: 'Cloudflare Worker route — rald-notify (notification.rald.cloud)'
-            });
-            if (r.success) {
-              console.log('Created notification.rald.cloud AAAA 100:: (proxied)');
-            } else {
-              console.error('DNS record creation failed:', JSON.stringify(r.errors));
-            }
+            await ensureAAAA(zone.id, 'notification.rald.cloud', 'notification');
+            await ensureAAAA(zone.id, 'notify.rald.cloud', 'notify');
           })().catch(e => { console.error('[WARN] DNS step error:', e.message); });
           JSEOF
 
@@ -106,7 +106,6 @@ jobs:
           if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then echo "FATAL: SUPABASE_SERVICE_ROLE_KEY not set" && exit 1; fi
           echo "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --name rald-notify
           echo "SUPABASE_SERVICE_ROLE_KEY pushed to rald-notify"
-
 
       - name: Push RALD_JWT_SECRET to worker
         env:
@@ -154,10 +153,12 @@ jobs:
 
       - name: Post-deploy smoke test
         run: |
-          sleep 5
-          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" https://notification.rald.cloud/health || echo "000")
-          echo "notification.rald.cloud/health → HTTP $STATUS"
-          if [ "$STATUS" = "200" ]; then echo "SMOKE TEST PASSED"; else echo "WARNING: HTTP $STATUS (non-fatal)"; fi
+          sleep 8
+          for HOST in notification.rald.cloud notify.rald.cloud; do
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "https://${HOST}/health" || echo "000")
+            echo "${HOST}/health → HTTP ${STATUS}"
+            if [ "$STATUS" = "200" ]; then echo "  ✓ PASSED"; else echo "  ⚠ WARNING: $STATUS (non-fatal)"; fi
+          done
         continue-on-error: true
 
       - name: Record deployment audit
