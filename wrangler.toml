@@ -15,8 +15,8 @@ zone_name = "rald.cloud"
 binding = "RATE_LIMIT_KV"
 id = "f54f9248247a428bb4e54ddfc1e2c832"
 
-# [triggers] — cron triggers require additional Cloudflare API permissions.
-# Add via Cloudflare Dashboard: Workers & Pages → rald-notify → Triggers → Cron Triggers → */5 * * * *
+[triggers]
+crons = ["*/5 * * * *"]
 
 [observability]
 enabled = true
