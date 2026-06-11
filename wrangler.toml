@@ -12,6 +12,10 @@ SUPABASE_URL = "https://onxdcikfttdmnhofsuwo.supabase.co"
 pattern = "notification.rald.cloud/*"
 zone_name = "rald.cloud"
 
+[[routes]]
+pattern = "notify.rald.cloud/*"
+zone_name = "rald.cloud"
+
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
 id = "f54f9248247a428bb4e54ddfc1e2c832"
