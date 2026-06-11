@@ -76,6 +76,12 @@ app.route("/api/audit",         auditRoutes);
 // Scheduled trigger — process queued retries
 export default {
   async fetch(req: Request, env: Bindings, ctx: ExecutionContext): Promise<Response> {
+    // ── Health bypass — liveness probes must always get a 200 ──────────
+    const pathname = new URL(req.url).pathname;
+    if (pathname === "/health" || pathname === "/healthz" || pathname === "/healthcheck" || pathname === "/readyz") {
+      return app.fetch(req, env, ctx);
+    }
+
     // ── FAIL FAST — service must not start with missing secrets ──────────
     // FIX-003 (2026-06-10): RESEND_API_KEY demoted to warning — service runs degraded without it.
     const missing: string[] = [];
