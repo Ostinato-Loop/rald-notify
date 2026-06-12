@@ -13,6 +13,7 @@ import deliveriesRoutes from "./routes/deliveries";
 import eventsRoutes from "./routes/events";
 import auditRoutes from "./routes/audit";
 import notificationCenterRoutes from "./routes/center";
+import { requestLogger }         from "./lib/logger";
 
 export interface KVNamespace {
   get(key: string): Promise<string | null>;
@@ -35,6 +36,8 @@ export type Bindings = {
   ENVIRONMENT?: string;
   RATE_LIMIT_KV?: KVNamespace;
   RALD_INTERNAL_SECRET?: string;
+  OPEN_OBSERVE_API_KEY?: string;  // OpenObserve ingest key (C-CERT-004)
+  OPEN_OBSERVE_ENDPOINT?: string; // e.g. https://observe.rald.cloud/api/rald/rald-notify/_json
 };
 
 export type Variables = {
@@ -44,6 +47,9 @@ export type Variables = {
 };
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+// ── Request logger — OpenObserve log shipping ────────────────────────────────
+app.use("*", requestLogger("rald-notify"));
 
 app.use("*", cors({
   origin: [
