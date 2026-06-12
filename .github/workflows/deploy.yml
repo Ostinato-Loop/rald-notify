@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy to Cloudflare Workers (notification.rald.cloud + notify.rald.cloud)
+    name: Deploy to Cloudflare Workers (notification.rald.cloud)
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -54,7 +54,7 @@ jobs:
           })().catch(e => { console.error(e); process.exit(1); });
           JSEOF
 
-      - name: Ensure DNS records for notification.rald.cloud and notify.rald.cloud
+      - name: Ensure DNS records for notification.rald.cloud
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -71,7 +71,7 @@ jobs:
           async function ensureAAAA(zoneId, name, label) {
             const existing = await api('GET', `/zones/${zoneId}/dns_records?name=${name}`);
             if (existing.result?.length > 0) {
-              console.log(`✓ ${name} DNS already exists: ${existing.result.map(r => r.type + ' ' + r.content + ' proxied=' + r.proxied).join(', ')}`);
+              console.log(`✓ ${name} DNS already exists`);
               return;
             }
             const r = await api('POST', `/zones/${zoneId}/dns_records`, {
@@ -85,9 +85,7 @@ jobs:
             const zones = await api('GET', '/zones?name=rald.cloud&per_page=5');
             const zone = zones.result?.[0];
             if (!zone) { console.log('WARN: rald.cloud zone not found — skipping DNS step'); return; }
-            console.log(`Zone: ${zone.id} (${zone.name})`);
             await ensureAAAA(zone.id, 'notification.rald.cloud', 'notification');
-            await ensureAAAA(zone.id, 'notify.rald.cloud', 'notify');
           })().catch(e => { console.error('[WARN] DNS step error:', e.message); });
           JSEOF
 
@@ -151,14 +149,32 @@ jobs:
             echo "VAPID pushed"
           fi
 
+      # ── C-CERT-004: Centralized Log Shipping (OpenObserve) ─────────────────
+      # Add OPEN_OBSERVE_API_KEY and OPEN_OBSERVE_ENDPOINT_NOTIFY to org secrets.
+      # Endpoint format: https://observe.rald.cloud/api/rald/rald-notify/_json
+      - name: Push OpenObserve secrets to worker (C-CERT-004)
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPEN_OBSERVE_API_KEY: ${{ secrets.OPEN_OBSERVE_API_KEY }}
+          OPEN_OBSERVE_ENDPOINT_NOTIFY: ${{ secrets.OPEN_OBSERVE_ENDPOINT_NOTIFY }}
+        run: |
+          if [ -n "$OPEN_OBSERVE_API_KEY" ]; then
+            echo "$OPEN_OBSERVE_API_KEY" | npx wrangler secret put OPEN_OBSERVE_API_KEY --name rald-notify
+            echo "$OPEN_OBSERVE_ENDPOINT_NOTIFY" | npx wrangler secret put OPEN_OBSERVE_ENDPOINT --name rald-notify
+            echo "OpenObserve secrets pushed to rald-notify ✓ (C-CERT-004 resolved)"
+          else
+            echo "WARNING: OPEN_OBSERVE_API_KEY not set — log shipping disabled (C-CERT-004 pending)"
+            echo "  Add to GitHub org secrets: OPEN_OBSERVE_API_KEY + OPEN_OBSERVE_ENDPOINT_NOTIFY"
+          fi
+
       - name: Post-deploy smoke test
         run: |
           sleep 8
-          for HOST in notification.rald.cloud notify.rald.cloud; do
-            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "https://${HOST}/health" || echo "000")
-            echo "${HOST}/health → HTTP ${STATUS}"
-            if [ "$STATUS" = "200" ]; then echo "  ✓ PASSED"; else echo "  ⚠ WARNING: $STATUS (non-fatal)"; fi
-          done
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "https://notification.rald.cloud/health" || echo "000")
+          echo "notification.rald.cloud/health → HTTP ${STATUS}"
+          if [ "$STATUS" = "200" ]; then echo "  ✓ PASSED"; else echo "  ⚠ WARNING: $STATUS (non-fatal)"; fi
         continue-on-error: true
 
       - name: Record deployment audit
