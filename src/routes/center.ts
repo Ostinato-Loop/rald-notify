@@ -4,20 +4,17 @@
 // LILCKY STUDIO LIMITED
 
 import { Hono } from "hono";
+import { requireMachinePublish, requireMachineAuth } from "../lib/machine-auth";
 import type { Bindings, Variables } from "../index";
 
 const notificationCenter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-function requireInternal(secret: string | undefined, env: Bindings): boolean {
-  return secret === env.RALD_INTERNAL_SECRET;
-}
 
 // ── POST /center/publish — product publishes a notification ───────────────────
 // Any RALD product sends here. Writes to notification_center table.
 // Delivery (push/SMS/email) handled by existing rald-notify channels.
-notificationCenter.post("/center/publish", async (c) => {
-  const secret = c.req.header("X-Internal-Secret");
-  if (!requireInternal(secret, c.env)) return c.json({ error: "Unauthorized" }, 401);
+// Requires scope: "notify:publish"
+notificationCenter.post("/center/publish", requireMachinePublish(), async (c) => {
 
   const db = c.get("db");
   const body = await c.req.json<{
