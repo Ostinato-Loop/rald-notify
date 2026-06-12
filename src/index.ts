@@ -12,6 +12,7 @@ import channelsRoutes from "./routes/channels";
 import deliveriesRoutes from "./routes/deliveries";
 import eventsRoutes from "./routes/events";
 import auditRoutes from "./routes/audit";
+import notificationCenterRoutes from "./routes/center";
 
 export interface KVNamespace {
   get(key: string): Promise<string | null>;
@@ -33,6 +34,7 @@ export type Bindings = {
   VAPID_SUBJECT?: string;
   ENVIRONMENT?: string;
   RATE_LIMIT_KV?: KVNamespace;
+  RALD_INTERNAL_SECRET?: string;
 };
 
 export type Variables = {
@@ -72,6 +74,7 @@ app.route("/api/channels",      channelsRoutes);
 app.route("/api/deliveries",    deliveriesRoutes);
 app.route("/api/events",        eventsRoutes);
 app.route("/api/audit",         auditRoutes);
+app.route("/api",                notificationCenterRoutes);
 
 // Scheduled trigger — process queued retries
 export default {
