@@ -8,12 +8,9 @@ SERVICE_NAME = "rald-notify"
 SERVICE_VERSION = "1.1.0"
 SUPABASE_URL = "https://onxdcikfttdmnhofsuwo.supabase.co"
 
+# Canonical domain only — notify.rald.cloud orphan route removed (C-CERT-003 fix)
 [[routes]]
 pattern = "notification.rald.cloud/*"
-zone_name = "rald.cloud"
-
-[[routes]]
-pattern = "notify.rald.cloud/*"
 zone_name = "rald.cloud"
 
 [[kv_namespaces]]
@@ -32,3 +29,4 @@ head_sampling_rate = 1
 #   SUPABASE_SERVICE_ROLE_KEY (org)
 #   RALD_JWT_SECRET, RESEND_API_KEY (optional: TERMII_API_KEY, VAPID_*)
 #   OPEN_OBSERVE_API_KEY, OPEN_OBSERVE_ENDPOINT (observability)
+#   RALD_INTERNAL_SECRET (deprecated — migrate callers to machine JWT)
