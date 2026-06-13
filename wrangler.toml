@@ -8,9 +8,16 @@ SERVICE_NAME = "rald-notify"
 SERVICE_VERSION = "1.1.0"
 SUPABASE_URL = "https://onxdcikfttdmnhofsuwo.supabase.co"
 
-# Canonical domain only — notify.rald.cloud orphan route removed (C-CERT-003 fix)
+# Primary canonical domain
 [[routes]]
 pattern = "notification.rald.cloud/*"
+zone_name = "rald.cloud"
+
+# Alias — both domains serve the same Worker.
+# DNS AAAA 100:: record exists from G.15; route must match or CF 522s.
+# (C-CERT-003 removed this; restored to fix persistent 522 on notify.rald.cloud)
+[[routes]]
+pattern = "notify.rald.cloud/*"
 zone_name = "rald.cloud"
 
 [[kv_namespaces]]
