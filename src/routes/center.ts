@@ -118,7 +118,7 @@ notificationCenter.post("/center/read", async (c) => {
   if (!userId) return c.json({ error: "X-User-Id header required" }, 401);
 
   const db = c.get("db");
-  const body = await c.req.json<{ ids?: string[]; all?: boolean }>().catch(() => ({}));
+  const body = await c.req.json<{ ids?: string[]; all?: boolean }>().catch((): { ids?: string[]; all?: boolean } => ({}));
 
   if (body.all) {
     await db.from("notification_center").update({ read_at: new Date().toISOString() })
