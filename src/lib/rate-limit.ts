@@ -1,5 +1,5 @@
 // RALD Notify — Rate Limiting (Cloudflare KV) — LILCKY STUDIO LIMITED
-import type { KVNamespace } from "../index";
+// KVNamespace is a global provided by @cloudflare/workers-types — no import needed
 
 export async function checkRateLimit(
   kv: KVNamespace | undefined,
