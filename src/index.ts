@@ -13,6 +13,7 @@ import deliveriesRoutes from "./routes/deliveries";
 import eventsRoutes from "./routes/events";
 import auditRoutes from "./routes/audit";
 import notificationCenterRoutes from "./routes/center";
+import provisionRoutes from "./routes/provision";
 import { requestLogger }         from "./lib/logger";
 
 // KVNamespace is provided globally by @cloudflare/workers-types — do not redefine here
@@ -67,6 +68,9 @@ app.use("*", async (c, next) => {
 
 // Health (public)
 app.route("/", healthRoutes);
+
+// Internal provisioning (called by event bus fan-out — no user auth)
+app.route("/", provisionRoutes);
 
 // API Routes
 app.route("/api/notifications", notificationsRoutes);
