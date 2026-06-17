@@ -15,11 +15,7 @@ import auditRoutes from "./routes/audit";
 import notificationCenterRoutes from "./routes/center";
 import { requestLogger }         from "./lib/logger";
 
-export interface KVNamespace {
-  get(key: string): Promise<string | null>;
-  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
-  delete(key: string): Promise<void>;
-}
+// KVNamespace is provided globally by @cloudflare/workers-types — do not redefine here
 
 export type Bindings = {
   SUPABASE_URL: string;
@@ -36,8 +32,8 @@ export type Bindings = {
   ENVIRONMENT?: string;
   RATE_LIMIT_KV?: KVNamespace;
   RALD_INTERNAL_SECRET?: string;
-  OPEN_OBSERVE_API_KEY?: string;  // OpenObserve ingest key (C-CERT-004)
-  OPEN_OBSERVE_ENDPOINT?: string; // e.g. https://observe.rald.cloud/api/rald/rald-notify/_json
+  OPEN_OBSERVE_API_KEY?: string;
+  OPEN_OBSERVE_ENDPOINT?: string;
 };
 
 export type Variables = {
@@ -85,14 +81,10 @@ app.route("/api",                notificationCenterRoutes);
 // Scheduled trigger — process queued retries
 export default {
   async fetch(req: Request, env: Bindings, ctx: ExecutionContext): Promise<Response> {
-    // ── Health bypass — liveness probes must always get a 200 ──────────
     const pathname = new URL(req.url).pathname;
     if (pathname === "/health" || pathname === "/healthz" || pathname === "/healthcheck" || pathname === "/readyz") {
       return app.fetch(req, env, ctx);
     }
-
-    // ── FAIL FAST — service must not start with missing secrets ──────────
-    // FIX-003 (2026-06-10): RESEND_API_KEY demoted to warning — service runs degraded without it.
     const missing: string[] = [];
     if (!env.RALD_JWT_SECRET)           missing.push('RALD_JWT_SECRET');
     if (!env.SUPABASE_URL)              missing.push('SUPABASE_URL');
@@ -107,10 +99,8 @@ export default {
     return app.fetch(req, env, ctx);
   },
   async scheduled(_event: ScheduledEvent, env: Bindings, _ctx: ExecutionContext) {
-    // Process notifications that are queued for retry or scheduled delivery
     const db = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
     const now = new Date().toISOString();
-    // Pick up scheduled notifications that are due
     const { data: scheduled } = await db.from("notifications")
       .select("id,workspace_id,channels,rendered_subject,rendered_body,rendered_html,recipient_email,recipient_phone,push_subscription")
       .eq("status", "queued")
@@ -119,7 +109,6 @@ export default {
     if (scheduled?.length) {
       console.log(`[rald-notify] Scheduled trigger: processing ${scheduled.length} notifications`);
     }
-    // Pick up failed deliveries eligible for retry (retry_count < 5, last attempt > 5min ago)
     const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const { data: retries } = await db.from("notification_deliveries")
       .select("id,notification_id,channel,retry_count")
