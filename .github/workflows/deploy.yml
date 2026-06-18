@@ -1,4 +1,4 @@
-name: Deploy
+name: Deploy to AWS ECR + App Runner
 
 on:
   push:
@@ -6,184 +6,179 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-rald-notify
+  group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy to Cloudflare Workers (notification.rald.cloud)
+  wizmac-read:
+    name: WIZMAC Read (mandatory)
     runs-on: ubuntu-latest
-    environment: production
-    permissions:
-      contents: read
-      deployments: write
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Read WIZMAC before any operation
+        run: |
+          echo "╔══════════════════════════════════════╗"
+          echo "║  WIZMAC MANDATORY READ — Pre-Deploy  ║"
+          echo "╚══════════════════════════════════════╝"
+          if [ -f WIZMAC.md ]; then
+            echo "✅ WIZMAC.md found"
+            head -5 WIZMAC.md
+          else
+            echo "⚠️  WIZMAC.md missing — add it before next sprint"
+          fi
+          echo "Reading WIZMAC ecosystem state..."
+          curl -sf https://sekani.rald.cloud/api/wizmac/read-state \
+            -H "Accept: application/json" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('WIZMAC status:', d.get('system','unknown'))
+ss=d.get('sprintState')
+if ss: print('Sprint score:', ss.get('score','?'))
+print('Recent events:', len(d.get('recentEvents',[])))
+print('Read at:', d.get('readAt',''))
+" 2>/dev/null || echo "⚠️  WIZMAC API unreachable (non-blocking)"
+      - name: Check kill switch
+        run: |
+          STATUS=$(curl -sf https://sekani.rald.cloud/api/wizmac/read-state | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+ks=d.get('killSwitch')
+if ks and isinstance(ks.get('value'), dict) and ks['value'].get('active'):
+  print('ACTIVE:', ks['value'].get('reason','no reason given'))
+  sys.exit(1)
+print('OK')
+" 2>/dev/null) || STATUS="OK"
+          if echo "$STATUS" | grep -q "^ACTIVE:"; then
+            echo "🚫 WIZMAC KILL SWITCH ACTIVE: $STATUS"
+            echo "   All deployments halted. Contact Principal Architect."
+            exit 1
+          fi
+          echo "✅ Kill switch: inactive. Proceeding with deploy."
+
+  build-and-push:
+    name: Build → ECR Push
+    needs: wizmac-read
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.build.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push to ECR
+        id: build
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ github.event.repository.name }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          aws ecr describe-repositories --repository-names $ECR_REPOSITORY \
+            || aws ecr create-repository --repository-name $ECR_REPOSITORY \
+               --image-scanning-configuration scanOnPush=true \
+               --encryption-configuration encryptionType=AES256
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "✅ Pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+  deploy-app-runner:
+    name: Deploy → App Runner
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy to AWS App Runner
+        env:
+          SERVICE_NAME: ${{ github.event.repository.name }}
+          IMAGE: ${{ needs.build-and-push.outputs.image }}
+        run: |
+          SERVICE_ARN=$(aws apprunner list-services \
+            --query "ServiceSummaryList[?ServiceName=='$SERVICE_NAME'].ServiceArn" \
+            --output text 2>/dev/null)
+
+          if [ -z "$SERVICE_ARN" ]; then
+            echo "Creating new App Runner service: $SERVICE_NAME"
+            ROLE_ARN=$(aws iam get-role --role-name AppRunnerECRRole \
+              --query "Role.Arn" --output text 2>/dev/null || echo "")
+            aws apprunner create-service \
+              --service-name "$SERVICE_NAME" \
+              --source-configuration "{
+                \"ImageRepository\": {
+                  \"ImageIdentifier\": \"$IMAGE\",
+                  \"ImageRepositoryType\": \"ECR\",
+                  \"ImageConfiguration\": {
+                    \"Port\": \"3000\",
+                    \"RuntimeEnvironmentVariables\": {
+                      \"NODE_ENV\": \"production\"
+                    }
+                  }
+                },
+                \"AutoDeploymentsEnabled\": false,
+                \"AuthenticationConfiguration\": {
+                  \"AccessRoleArn\": \"$ROLE_ARN\"
+                }
+              }" \
+              --instance-configuration "Cpu=0.25 vCPU,Memory=0.5 GB"
+          else
+            echo "Updating existing App Runner service: $SERVICE_ARN"
+            aws apprunner update-service \
+              --service-arn "$SERVICE_ARN" \
+              --source-configuration "{
+                \"ImageRepository\": {
+                  \"ImageIdentifier\": \"$IMAGE\",
+                  \"ImageRepositoryType\": \"ECR\"
+                }
+              }"
+          fi
+          echo "✅ App Runner deploy triggered for $SERVICE_NAME"
+
+  wizmac-report:
+    name: WIZMAC Write (mandatory)
+    needs: [build-and-push, deploy-app-runner]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install dependencies
-        run: npm install
-
-      - name: Resolve KV namespace ID via Cloudflare API
+      - name: Report to WIZMAC after deploy
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WIZMAC_API_URL: https://sekani.rald.cloud
+          WIZMAC_SERVICE: ${{ github.event.repository.name }}
+          WIZMAC_ACTION: ${{ needs.deploy-app-runner.result == 'success' && 'deployed-to-aws' || 'deploy-failed' }}
+          WIZMAC_ACTOR: ${{ github.actor }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
         run: |
-          node << 'JSEOF'
-          const fs = require('fs');
-          const h = { 'Authorization': `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' };
-          const base = `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces`;
-          async function listAll() { const r = await fetch(`${base}?per_page=100`, { headers: h }); const d = await r.json(); if (!d.success) throw new Error(JSON.stringify(d.errors)); return d.result; }
-          async function resolveId(title) {
-            const all = await listAll();
-            const e = all.find(n => n.title === title);
-            if (e) { console.log(`  [existing] ${title}`); return e.id; }
-            const r = await fetch(base, { method: 'POST', headers: h, body: JSON.stringify({ title }) });
-            const d = await r.json();
-            if (!d.success) { const retry = (await listAll()).find(n => n.title === title); if (retry) return retry.id; throw new Error(JSON.stringify(d.errors)); }
-            console.log(`  [created]  ${title}`); return d.result.id;
-          }
-          (async () => {
-            const RATE_LIMIT_KV = await resolveId('rald-notify-rate-limit');
-            let toml = fs.readFileSync('wrangler.toml', 'utf8');
-            toml = toml.replace('REPLACE_WITH_RATE_LIMIT_KV_ID', RATE_LIMIT_KV);
-            fs.writeFileSync('wrangler.toml', toml);
-            console.log('wrangler.toml patched.');
-          })().catch(e => { console.error(e); process.exit(1); });
-          JSEOF
-
-      - name: Ensure DNS records for notification.rald.cloud + notify.rald.cloud
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          node << 'JSEOF'
-          const token = process.env.CLOUDFLARE_API_TOKEN;
-          const h = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
-          async function api(method, path, body) {
-            const r = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
-              method, headers: h, body: body ? JSON.stringify(body) : undefined
-            });
-            return r.json();
-          }
-          async function ensureAAAA(zoneId, name, label) {
-            const existing = await api('GET', `/zones/${zoneId}/dns_records?name=${name}`);
-            if (existing.result?.length > 0) {
-              console.log(`checkmark ${name} DNS already exists`);
-              return;
-            }
-            const r = await api('POST', `/zones/${zoneId}/dns_records`, {
-              type: 'AAAA', name: label, content: '100::', proxied: true,
-              comment: `Cloudflare Worker route - rald-notify (${name})`
-            });
-            if (r.success) console.log(`Created ${name} AAAA 100:: (proxied)`);
-            else console.error(`DNS ${name} failed:`, JSON.stringify(r.errors));
-          }
-          (async () => {
-            const zones = await api('GET', '/zones?name=rald.cloud&per_page=5');
-            const zone = zones.result?.[0];
-            if (!zone) { console.log('WARN: rald.cloud zone not found - skipping DNS step'); return; }
-            // Both Worker routes need a proxied AAAA 100:: DNS record.
-            // notify.rald.cloud was added in G.15 but the route was later removed (C-CERT-003).
-            // Route is restored; ensure DNS record is present for both aliases.
-            await ensureAAAA(zone.id, 'notification.rald.cloud', 'notification');
-            await ensureAAAA(zone.id, 'notify.rald.cloud', 'notify');
-          })().catch(e => { console.error('[WARN] DNS step error:', e.message); });
-          JSEOF
-
-      - name: Deploy rald-notify Worker
-        run: npx wrangler deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-      - name: Push SUPABASE_SERVICE_ROLE_KEY to worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: |
-          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then echo "FATAL: SUPABASE_SERVICE_ROLE_KEY not set" && exit 1; fi
-          echo "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --name rald-notify
-          echo "SUPABASE_SERVICE_ROLE_KEY pushed to rald-notify"
-
-      - name: Push RALD_JWT_SECRET to worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          RALD_JWT_SECRET: ${{ secrets.RALD_JWT_SECRET }}
-        run: |
-          if [ -z "$RALD_JWT_SECRET" ]; then
-            echo "WARNING: RALD_JWT_SECRET not set - add to org secrets to complete setup"
+          if [ -f scripts/report-to-wizmac.mjs ]; then
+            node scripts/report-to-wizmac.mjs
           else
-            echo "$RALD_JWT_SECRET" | npx wrangler secret put RALD_JWT_SECRET --name rald-notify
-            echo "RALD_JWT_SECRET pushed to rald-notify"
+            echo "⚠️  report-to-wizmac.mjs not found — reporting inline"
+            curl -sf -X POST https://sekani.rald.cloud/api/wizmac/events \
+              -H "Content-Type: application/json" \
+              -d "{\"eventType\":\"agent_action\",\"title\":\"[$WIZMAC_SERVICE] $WIZMAC_ACTION — ${GITHUB_SHA:0:8}\",\"actor\":\"$WIZMAC_ACTOR\",\"tags\":[\"ci\",\"mandatory-report\",\"$WIZMAC_SERVICE\"]}" \
+              2>/dev/null && echo "✅ WIZMAC reported" || echo "⚠️  WIZMAC report skipped"
           fi
-
-      - name: Push RESEND_API_KEY to worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-        run: |
-          if [ -n "$RESEND_API_KEY" ]; then echo "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY --name rald-notify && echo "pushed"; fi
-
-      - name: Push TERMII_API_KEY to worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          TERMII_API_KEY: ${{ secrets.TERMII_API_KEY }}
-        run: |
-          if [ -n "$TERMII_API_KEY" ]; then echo "$TERMII_API_KEY" | npx wrangler secret put TERMII_API_KEY --name rald-notify && echo "pushed"; fi
-
-      - name: Push VAPID secrets to worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
-          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
-        run: |
-          if [ -n "$VAPID_PUBLIC_KEY" ]; then
-            echo "$VAPID_PUBLIC_KEY"  | npx wrangler secret put VAPID_PUBLIC_KEY  --name rald-notify
-            echo "$VAPID_PRIVATE_KEY" | npx wrangler secret put VAPID_PRIVATE_KEY --name rald-notify
-            echo "$VAPID_SUBJECT"     | npx wrangler secret put VAPID_SUBJECT     --name rald-notify
-            echo "VAPID pushed"
-          fi
-
-      # C-CERT-004: Centralized Log Shipping (OpenObserve)
-      # Add OPEN_OBSERVE_API_KEY and OPEN_OBSERVE_ENDPOINT_NOTIFY to org secrets.
-      # Endpoint format: https://observe.rald.cloud/api/rald/rald-notify/_json
-      - name: Push OpenObserve secrets to worker (C-CERT-004)
-        continue-on-error: true
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          OPEN_OBSERVE_API_KEY: ${{ secrets.OPEN_OBSERVE_API_KEY }}
-          OPEN_OBSERVE_ENDPOINT_NOTIFY: ${{ secrets.OPEN_OBSERVE_ENDPOINT_NOTIFY }}
-        run: |
-          if [ -n "$OPEN_OBSERVE_API_KEY" ]; then
-            echo "$OPEN_OBSERVE_API_KEY" | npx wrangler secret put OPEN_OBSERVE_API_KEY --name rald-notify
-            echo "$OPEN_OBSERVE_ENDPOINT_NOTIFY" | npx wrangler secret put OPEN_OBSERVE_ENDPOINT --name rald-notify
-            echo "OpenObserve secrets pushed to rald-notify (C-CERT-004 resolved)"
-          else
-            echo "WARNING: OPEN_OBSERVE_API_KEY not set - log shipping disabled (C-CERT-004 pending)"
-            echo "  Add to GitHub org secrets: OPEN_OBSERVE_API_KEY + OPEN_OBSERVE_ENDPOINT_NOTIFY"
-          fi
-
-      - name: Post-deploy smoke test (both aliases)
-        run: |
-          sleep 8
-          for domain in notification.rald.cloud notify.rald.cloud; do
-            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "https://${domain}/health" || echo "000")
-            echo "${domain}/health -> HTTP ${STATUS}"
-            if [ "$STATUS" = "200" ]; then echo "  PASSED"; else echo "  WARNING: $STATUS (non-fatal)"; fi
-          done
-        continue-on-error: true
-
-      - name: Record deployment audit
-        if: always()
-        run: |
-          echo "AUDIT: service=rald-notify commit=${{ github.sha }} actor=${{ github.actor }} ts=$(date -u +%Y-%m-%dT%H:%M:%SZ) status=${{ job.status }}"
