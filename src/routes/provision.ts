@@ -79,18 +79,23 @@ provision.post("/internal/mailboxes/provision", async (c) => {
   }
 
   // Send welcome notification (best-effort, fire-and-forget)
+  // Fix: Supabase returns PromiseLike<T>, not Promise<T> — wrap in async IIFE for .catch support
   c.executionCtx.waitUntil(
-    db.from("notifications").insert({
-      user_id:   body.user_id,
-      type:      "system",
-      category:  "onboarding",
-      title:     "Welcome to RALD",
-      body:      `Your RALD account is ready. Your alias is ${body.rald_id ? `${body.rald_id}@rald` : "being set up"}.`,
-      channels:  ["in_app"],
-      status:    "queued",
-      priority:  "normal",
-      created_at: new Date().toISOString(),
-    }).then(() => {}).catch(() => {})
+    (async () => {
+      try {
+        await db.from("notifications").insert({
+          user_id:    body.user_id,
+          type:       "system",
+          category:   "onboarding",
+          title:      "Welcome to RALD",
+          body:       `Your RALD account is ready. Your alias is ${body.rald_id ? `${body.rald_id}@rald` : "being set up"}.`,
+          channels:   ["in_app"],
+          status:     "queued",
+          priority:   "normal",
+          created_at: new Date().toISOString(),
+        });
+      } catch { /* best-effort welcome notification */ }
+    })()
   );
 
   return c.json({ ok: true, user_id: body.user_id, idempotent: false }, 201);
